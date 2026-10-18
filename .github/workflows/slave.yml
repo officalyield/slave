@@ -12,18 +12,21 @@ jobs:
 
       - name: OpenHands 도커 노예 강제 가동
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }} 
         run: |
+          # 웹 화면을 켜지 않고, 명령어를 파일로 만들어서 일꾼에게 직접 쥐여줍니다.
           docker run --rm \
             -e SANDBOX_USER_ID=0 \
             -e LLM_API_KEY="$LLM_API_KEY" \
             -e LLM_PROVIDER="openrouter" \
             -e LLM_BASE_URL="https://openrouter.ai/api/v1" \
             -e LLM_MODEL="openrouter/free" \
-            -e AGENT_PROMPT="지금 당장 HTML과 JS로 끝내주는 모바일 슈팅 게임을 빌드해라. 에러가 나면 지치지 말고 고칠 때까지 반복해라." \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v ${{ github.workspace }}:/opt/workspace \
-            ghcr.io/all-hands-ai/openhands:latest
+            ghcr.io/all-hands-ai/openhands:latest \
+            python -m openhands.core.main \
+            -i "지금 당장 /opt/workspace 폴더 안에 HTML, JS, CSS로 끝내주는 모바일 슈팅 게임을 빌드해라. 에러가 나면 지치지 말고 고칠 때까지 반복해라."
+
 
       - name: 밤새 노예가 짠 코드 내 저장소에 강제 저장(커밋)
         run: |
