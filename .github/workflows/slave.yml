@@ -65,7 +65,7 @@ jobs:
 
       - name: Autonomous development loop
         env:
-          OPENROUTER_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         shell: bash
         run: |
           set -uo pipefail
