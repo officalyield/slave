@@ -1,37 +1,142 @@
-name: 24 Hours Non-Stop Coding Factory
+name: Qwen Autonomous Development Loop
+
 on:
-  workflow_dispatch: # 스마트폰으로 '버튼' 누르면 바로 노동 시작하는 스위치
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: qwen-autonomous-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  run-slave:
+  autonomous-development:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # 깃허브 액션 최대 한도인 6시간(360분) 설정!
+    timeout-minutes: 350
+
     steps:
-      - name: 저장소 코드 가져오기
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: true
 
-      - name: OpenHands 도커 노예 강제 가동
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install OpenCode
+        run: npm install -g opencode-ai
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Initial planning (once only)
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }} 
+          OPENROUTER_API_KEY: ${{ secrets.LLM_API_KEY }}
+        shell: bash
         run: |
-          # 웹 화면을 켜지 않고, 명령어를 파일로 만들어서 일꾼에게 직접 쥐여줍니다.
-          docker run --rm \
-            -e SANDBOX_USER_ID=0 \
-            -e LLM_API_KEY="$LLM_API_KEY" \
-            -e LLM_PROVIDER="openrouter" \
-            -e LLM_BASE_URL="https://openrouter.ai/api/v1" \
-            -e LLM_MODEL="openrouter/free" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}:/opt/workspace \
-            ghcr.io/all-hands-ai/openhands:latest \
-            python -m openhands.core.main \
-            -t "지금 당장 /opt/workspace 폴더 안에 HTML, JS, CSS로 끝내주는 모바일 슈팅 게임을 빌드해라. 에러가 나면 지치지 말고 고칠 때까지 반복해라."
+          set -euo pipefail
 
+          if [[ ! -s PLAN.md ]]; then
+            opencode run \
+              --model "openrouter/qwen/qwen3.6-plus:free" \
+              "Analyze this repository and create PLAN.md.
+              Define architecture, priorities, milestones, acceptance criteria,
+              test strategy, and a practical long-term roadmap.
+              This is planning only. Do not implement project features.
+              Create PLAN.md and finish."
 
-      - name: 밤새 노예가 짠 코드 내 저장소에 강제 저장(커밋)
+            test -s PLAN.md
+
+            git add -- PLAN.md
+            git commit -m "docs(ai): create initial roadmap"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          else
+            echo "PLAN.md already exists; skipping planning."
+          fi
+
+      - name: Autonomous development loop
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.LLM_API_KEY }}
+        shell: bash
         run: |
-          git config --global user.name "Slave-Bot"
-          git config --global user.email "slave@bot.com"
-          git add . 
-          git commit -m "노예가 밤새 채찍질당하며 짠 코드 보고합니다." || exit 0
-          git push
+          set -uo pipefail
+
+          START=$SECONDS
+          LIMIT=19500
+          ITERATION=0
+
+          while (( SECONDS - START < LIMIT )); do
+            ITERATION=$((ITERATION + 1))
+
+            echo "===== ITERATION ${ITERATION} ====="
+
+            # Sync with the remote branch.
+            if ! git pull --rebase origin "${GITHUB_REF_NAME}"; then
+              echo "Sync failed; retrying in 60 seconds."
+              sleep 60
+              continue
+            fi
+
+            # Develop, test, fix, and record progress.
+            if timeout 40m opencode run \
+              --model "openrouter/qwen/qwen3.6-plus:free" \
+              "You are the autonomous developer of this repository.
+
+              Read PLAN.md and PROGRESS.md if it exists.
+              Never recreate the original PLAN.md.
+
+              Select the highest-priority unfinished task.
+              Inspect the existing implementation before changing it.
+              Implement a useful, bounded improvement.
+              Run relevant tests, builds, and lint checks.
+              Analyze failures, fix the code, and rerun failed checks.
+              Never invent successful test results.
+
+              Update PROGRESS.md with:
+              - Changes completed
+              - Tests actually executed and their results
+              - Known issues and blockers
+              - Remaining tasks and the next priority
+
+              Keep the project working.
+              Do not expose secrets or make unrelated changes.
+              If a task is blocked, document it and try another useful task.
+
+              Complete this development cycle before finishing."; then
+              echo "Agent cycle finished."
+            else
+              echo "Agent failed, timed out, or encountered a provider error."
+            fi
+
+            # Stage changes, commit, and push.
+            git add -A
+
+            if ! git diff --cached --quiet; then
+              if git commit \
+                -m "chore(ai): autonomous iteration ${ITERATION}"; then
+
+                if ! git push origin "HEAD:${GITHUB_REF_NAME}"; then
+                  echo "Push failed; attempting rebase and retry."
+
+                  if git pull --rebase origin "${GITHUB_REF_NAME}"; then
+                    git push origin "HEAD:${GITHUB_REF_NAME}" || true
+                  fi
+                fi
+              fi
+            else
+              echo "No changes to commit."
+            fi
+
+            sleep 5
+          done
+
+          echo "Time budget reached; next scheduled run will resume."
